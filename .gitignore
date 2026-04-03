@@ -54,6 +54,10 @@ pnpm-debug.log*
 !.env.example
 docker-compose.override.yml
 
+# 本机下载的 Go SDK（解压后文件极多，勿提交、勿出现在 Git 变更里）
+# 使用 / 前缀仅匹配仓库根目录下的 .tools，避免误伤其它路径名
+/.tools/
+
 # ===================
 # IDE / 编辑器
 # ===================
@@ -103,6 +107,7 @@ backend/internal/web/dist/*
 
 # 后端运行时缓存数据
 backend/data/
+/data/
 
 # ===================
 # 本地配置文件（包含敏感信息）
@@ -132,4 +137,3 @@ docs/*
 frontend/coverage/
 aicodex
 output/
-
