@@ -1,7 +1,7 @@
 export default {
   // Home Page
   home: {
-    viewOnGithub: 'View on GitHub',
+    viewOnGithub: '',
     viewDocs: 'View Documentation',
     docs: 'Docs',
     switchToLight: 'Switch to Light Mode',
@@ -374,7 +374,7 @@ export default {
     collapse: 'Collapse',
     expand: 'Expand',
     logout: 'Logout',
-    github: 'GitHub',
+    github: '',
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Recharge / Subscription',
     docs: 'Docs',

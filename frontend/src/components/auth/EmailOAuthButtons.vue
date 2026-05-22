@@ -17,8 +17,7 @@
         class="btn btn-secondary h-12 w-full justify-center gap-2"
         @click="startLogin(provider)"
       >
-        <GitHubMark v-if="provider === 'github'" class="h-5 w-5 text-gray-800 dark:text-gray-100" />
-        <GoogleMark v-else class="h-5 w-5" />
+        <GoogleMark class="h-5 w-5" />
         <span class="font-medium">{{ providerLabel(provider) }}</span>
       </button>
     </div>
@@ -29,11 +28,10 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import GitHubMark from './GitHubMark.vue'
 import GoogleMark from './GoogleMark.vue'
 import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
 
-type EmailOAuthProvider = 'github' | 'google'
+type EmailOAuthProvider = 'google'
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
 
 const props = withDefaults(defineProps<{
@@ -51,7 +49,6 @@ const { t } = useI18n()
 
 const visibleProviders = computed<EmailOAuthProvider[]>(() => {
   const providers: EmailOAuthProvider[] = []
-  if (props.githubEnabled) providers.push('github')
   if (props.googleEnabled) providers.push('google')
   return providers
 })
@@ -65,8 +62,8 @@ const providerGridClass = computed(() => [
   hasMultipleProviders.value ? 'sm:grid-cols-2' : ''
 ])
 
-function providerLabel(provider: EmailOAuthProvider): string {
-  const name = provider === 'github' ? 'GitHub' : 'Google'
+function providerLabel(_provider: EmailOAuthProvider): string {
+  const name = 'Google'
   return hasMultipleProviders.value ? name : t('auth.emailOAuth.signIn', { providerName: name })
 }
 

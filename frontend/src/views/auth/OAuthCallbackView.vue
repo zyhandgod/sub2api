@@ -178,7 +178,7 @@ const password = ref('')
 const confirmPassword = ref('')
 const invitationCode = ref('')
 const registrationError = ref('')
-const pendingProvider = ref<'github' | 'google'>('github')
+const pendingProvider = ref<'google'>('google')
 const redirectTo = ref('/dashboard')
 const invalidCallback = ref(false)
 const EMAIL_OAUTH_PENDING_PROVIDER_KEY = 'email_oauth_pending_provider'
@@ -202,9 +202,7 @@ const fullUrl = computed(() => {
   if (typeof window === 'undefined') return ''
   return window.location.href
 })
-const providerName = computed(() =>
-  pendingProvider.value === 'google' ? 'Google' : 'GitHub'
-)
+const providerName = computed(() => 'Google')
 const registrationHint = computed(() =>
   invitationRequired.value
     ? t('auth.oidc.invitationRequired', { providerName: providerName.value })
@@ -247,14 +245,14 @@ function sanitizeRedirectPath(path: string | null | undefined): string {
   return path
 }
 
-function readPendingEmailOAuthProvider(): 'github' | 'google' | null {
+function readPendingEmailOAuthProvider(): 'google' | null {
   if (typeof window === 'undefined') return null
   const provider = window.sessionStorage.getItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY)
-  if (provider === 'github' || provider === 'google') return provider
+  if (provider === 'google') return provider
   return null
 }
 
-function redirectProviderCallbackToBackend(provider: 'github' | 'google'): void {
+function redirectProviderCallbackToBackend(provider: 'google'): void {
   if (typeof window === 'undefined') return
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
   const normalized = apiBase.replace(/\/$/, '')
@@ -298,7 +296,7 @@ async function resumePendingEmailOAuth() {
     }
 
     const provider = String(completion.provider || '').toLowerCase()
-    if (provider === 'github' || provider === 'google') {
+    if (provider === 'google') {
       pendingProvider.value = provider
     }
     redirectTo.value = sanitizeRedirectPath(completionRedirect)

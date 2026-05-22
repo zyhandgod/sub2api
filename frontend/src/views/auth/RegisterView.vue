@@ -421,7 +421,6 @@ const showOAuthLogin = computed(
     linuxdoOAuthEnabled.value ||
     wechatOAuthEnabled.value ||
     oidcOAuthEnabled.value ||
-    githubOAuthEnabled.value ||
     googleOAuthEnabled.value
 )
 
@@ -465,7 +464,7 @@ onMounted(async () => {
     wechatOAuthEnabled.value = isWeChatWebOAuthEnabled(settings)
     oidcOAuthEnabled.value = settings.oidc_oauth_enabled
     oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
-    githubOAuthEnabled.value = settings.github_oauth_enabled
+    githubOAuthEnabled.value = false
     googleOAuthEnabled.value = settings.google_oauth_enabled
     registrationEmailSuffixWhitelist.value = normalizeRegistrationEmailSuffixWhitelist(
       settings.registration_email_suffix_whitelist || []

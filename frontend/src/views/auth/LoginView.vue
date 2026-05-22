@@ -293,7 +293,6 @@ const showOAuthLogin = computed(
       dingtalkOAuthEnabled.value ||
       wechatOAuthEnabled.value ||
       oidcOAuthEnabled.value ||
-      githubOAuthEnabled.value ||
       googleOAuthEnabled.value)
 )
 
@@ -324,7 +323,7 @@ onMounted(async () => {
     backendModeEnabled.value = settings.backend_mode_enabled
     oidcOAuthEnabled.value = settings.oidc_oauth_enabled
     oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
-    githubOAuthEnabled.value = settings.github_oauth_enabled
+    githubOAuthEnabled.value = false
     googleOAuthEnabled.value = settings.google_oauth_enabled
     backendModeEnabled.value = settings.backend_mode_enabled
     passwordResetEnabled.value = settings.password_reset_enabled
