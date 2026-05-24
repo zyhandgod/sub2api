@@ -129,9 +129,11 @@
         :allow-multiple="false"
         :method-label="t('admin.accounts.inputMethod')"
         :platform="isOpenAI ? 'openai' : isGemini ? 'gemini' : isAntigravity ? 'antigravity' : 'anthropic'"
+        :show-codex-session-import-option="isOpenAI"
         :show-project-id="isGemini && geminiOAuthType === 'code_assist'"
         @generate-url="handleGenerateUrl"
         @cookie-auth="handleCookieAuth"
+        @import-codex-session="handleImportCodexSession"
       />
 
     </div>
@@ -537,6 +539,57 @@ const handleCookieAuth = async (sessionKey: string) => {
       error.response?.data?.detail || t('admin.accounts.oauth.cookieAuthFailed')
   } finally {
     claudeOAuth.loading.value = false
+  }
+}
+
+const handleImportCodexSession = async (content: string) => {
+  if (!props.account || !isOpenAI.value) return
+
+  const trimmed = content.trim()
+  if (!trimmed) {
+    openaiOAuth.error.value = t('admin.accounts.oauth.openai.codexSessionEmpty')
+    return
+  }
+
+  openaiOAuth.loading.value = true
+  openaiOAuth.error.value = ''
+
+  try {
+    const result = await adminAPI.accounts.importCodexSession({
+      content: trimmed,
+      name: props.account.name,
+      notes: props.account.notes || null,
+      proxy_id: props.account.proxy_id,
+      update_existing: true
+    })
+
+    const successCount = result.created + result.updated
+    if (successCount > 0 && result.failed === 0) {
+      const updatedAccount = await adminAPI.accounts.clearError(props.account.id)
+      appStore.showSuccess(
+        t('admin.accounts.oauth.openai.codexSessionImportSuccess', {
+          created: result.created,
+          updated: result.updated,
+          skipped: result.skipped,
+          failed: result.failed
+        })
+      )
+      emit('reauthorized', updatedAccount)
+      handleClose()
+      return
+    }
+
+    openaiOAuth.error.value = t('admin.accounts.oauth.openai.codexSessionImportFailed')
+    appStore.showError(openaiOAuth.error.value)
+  } catch (error: any) {
+    openaiOAuth.error.value =
+      error.response?.data?.detail ||
+      error.response?.data?.message ||
+      error.message ||
+      t('admin.accounts.oauth.openai.codexSessionImportFailed')
+    appStore.showError(openaiOAuth.error.value)
+  } finally {
+    openaiOAuth.loading.value = false
   }
 }
 </script>
