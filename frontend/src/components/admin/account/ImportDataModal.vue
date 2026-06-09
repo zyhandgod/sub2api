@@ -19,23 +19,40 @@
       <div>
         <label class="input-label">{{ t('admin.accounts.dataImportFile') }}</label>
         <div
-          class="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 dark:border-dark-600 dark:bg-dark-800"
+          :class="[
+            'rounded-lg border-2 border-dashed px-4 py-4 transition-colors',
+            dragActive
+              ? 'border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-900/20'
+              : 'border-gray-300 bg-gray-50 hover:border-primary-400 hover:bg-primary-50/40 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-primary-600 dark:hover:bg-primary-900/10'
+          ]"
+          @dragenter.prevent="dragActive = true"
+          @dragover.prevent="dragActive = true"
+          @dragleave.prevent="dragActive = false"
+          @drop.prevent="handleFileDrop"
         >
-          <div class="min-w-0">
-            <div class="truncate text-sm text-gray-700 dark:text-dark-200">
-              {{ fileName || t('admin.accounts.dataImportSelectFile') }}
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+              <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
+                {{ t('admin.accounts.dataImportDropTitle') }}
+              </div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                {{ t('admin.accounts.dataImportDropHint') }}
+              </div>
+              <div v-if="mergedContent" class="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+                {{ t('admin.accounts.dataImportMergedFromFiles', { count: sourceFileCount }) }}
+              </div>
             </div>
-            <div class="text-xs text-gray-500 dark:text-dark-400">JSON (.json)</div>
+            <button type="button" class="btn btn-secondary shrink-0" @click="openFilePicker">
+              {{ t('common.chooseFile') }}
+            </button>
           </div>
-          <button type="button" class="btn btn-secondary shrink-0" @click="openFilePicker">
-            {{ t('common.chooseFile') }}
-          </button>
         </div>
         <input
           ref="fileInput"
           type="file"
           class="hidden"
           accept="application/json,.json"
+          multiple
           @change="handleFileChange"
         />
       </div>
@@ -90,7 +107,8 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
-import type { AdminDataImportResult } from '@/types'
+import { useJsonFileDrop } from '@/composables/useJsonFileDrop'
+import type { AdminDataImportResult, AdminDataPayload, CodexSessionImportResult } from '@/types'
 
 interface Props {
   show: boolean
@@ -106,13 +124,16 @@ const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { dragActive, collectFromFileList, collectFromDataTransfer } = useJsonFileDrop()
 
 const importing = ref(false)
-const file = ref<File | null>(null)
+const sourceFiles = ref<File[]>([])
+const sourceFileCount = ref(0)
+const mergedContent = ref('')
+const mergedFileKind = ref<'standard' | 'codex' | null>(null)
 const result = ref<AdminDataImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const fileName = computed(() => file.value?.name || '')
 
 const errorItems = computed(() => result.value?.errors || [])
 
@@ -120,7 +141,10 @@ watch(
   () => props.show,
   (open) => {
     if (open) {
-      file.value = null
+      sourceFiles.value = []
+      sourceFileCount.value = 0
+      mergedContent.value = ''
+      mergedFileKind.value = null
       result.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -133,9 +157,19 @@ const openFilePicker = () => {
   fileInput.value?.click()
 }
 
-const handleFileChange = (event: Event) => {
+const handleFileChange = async (event: Event) => {
   const target = event.target as HTMLInputElement
-  file.value = target.files?.[0] || null
+  sourceFiles.value = collectFromFileList(target.files)
+  await prepareMergedFile(sourceFiles.value)
+}
+
+const handleFileDrop = async (event: DragEvent) => {
+  dragActive.value = false
+  sourceFiles.value = await collectFromDataTransfer(event.dataTransfer)
+  await prepareMergedFile(sourceFiles.value)
+  if (fileInput.value) {
+    fileInput.value.value = ''
+  }
 }
 
 const handleClose = () => {
@@ -161,21 +195,102 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
   })
 }
 
+const readJsonPayloads = async (sourceFiles: File[]): Promise<unknown[]> => {
+  return await Promise.all(sourceFiles.map(async (sourceFile) => JSON.parse(await readFileAsText(sourceFile))))
+}
+
+const readImportPayload = (payloads: any[]): AdminDataPayload => {
+  const [firstPayload] = payloads
+  return {
+    type: firstPayload?.type,
+    version: firstPayload?.version,
+    exported_at: firstPayload?.exported_at || new Date().toISOString(),
+    proxies: payloads.flatMap((payload) => payload.proxies ?? []),
+    accounts: payloads.flatMap((payload) => payload.accounts ?? [])
+  }
+}
+
+const isCodexPayload = (payload: unknown): boolean => {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    String((payload as { type?: unknown }).type ?? '').trim().toLowerCase() === 'codex'
+  )
+}
+
+const buildCodexImportContent = (payloads: unknown[]): string => {
+  return JSON.stringify(payloads, null, 2)
+}
+
+const toDataImportResultFromCodex = (codexResult: CodexSessionImportResult): AdminDataImportResult => {
+  return {
+    proxy_created: 0,
+    proxy_reused: 0,
+    proxy_failed: 0,
+    account_created: codexResult.created + codexResult.updated,
+    account_failed: codexResult.failed,
+    errors: (codexResult.errors || []).map((item) => ({
+      kind: 'account',
+      name: item.name,
+      message: `#${item.index}: ${item.message}`
+    }))
+  }
+}
+
+const prepareMergedFile = async (nextFiles: File[]) => {
+  result.value = null
+  sourceFileCount.value = nextFiles.length
+  mergedContent.value = ''
+  mergedFileKind.value = null
+
+  if (nextFiles.length === 0) return
+
+  try {
+    const payloads = await readJsonPayloads(nextFiles)
+    const hasCodexPayload = payloads.some(isCodexPayload)
+    const hasStandardPayload = payloads.some((payload) => !isCodexPayload(payload))
+
+    if (hasCodexPayload && hasStandardPayload) {
+      appStore.showError(t('admin.accounts.dataImportMixedTypes'))
+      return
+    }
+
+    const kind = hasCodexPayload ? 'codex' : 'standard'
+    mergedContent.value = kind === 'codex'
+      ? buildCodexImportContent(payloads)
+      : JSON.stringify(readImportPayload(payloads as any[]), null, 2)
+
+    mergedFileKind.value = kind
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      appStore.showError(t('admin.accounts.dataImportParseFailed'))
+    } else {
+      appStore.showError(t('admin.accounts.dataImportFailed'))
+    }
+  }
+}
+
 const handleImport = async () => {
-  if (!file.value) {
+  if ((!mergedContent.value || !mergedFileKind.value) && sourceFiles.value.length > 0) {
+    await prepareMergedFile(sourceFiles.value)
+  }
+  if (!mergedContent.value || !mergedFileKind.value) {
     appStore.showError(t('admin.accounts.dataImportSelectFile'))
     return
   }
 
   importing.value = true
   try {
-    const text = await readFileAsText(file.value)
-    const dataPayload = JSON.parse(text)
-
-    const res = await adminAPI.accounts.importData({
-      data: dataPayload,
-      skip_default_group_bind: true
-    })
+    const res = mergedFileKind.value === 'codex'
+      ? toDataImportResultFromCodex(await adminAPI.accounts.importCodexSession({
+          content: mergedContent.value,
+          update_existing: true,
+          skip_default_group_bind: true
+        }))
+      : await adminAPI.accounts.importData({
+          data: JSON.parse(mergedContent.value),
+          skip_default_group_bind: true
+        })
 
     result.value = res
 
