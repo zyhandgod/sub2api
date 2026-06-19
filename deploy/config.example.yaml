@@ -630,6 +630,23 @@ token_refresh:
   # 是否允许 OpenAI 刷新流程同步覆盖 linked_openai_account_id 关联的 Sora 账号 token
   sync_linked_sora_accounts: false
 
+# OpenAI proxy auto switch
+# OpenAI 代理自动切换：定时检测代理是否能访问 OpenAI，排除香港等不可用出口，
+# 并把 OpenAI 账号切到低于阈值的最快代理。
+openai_proxy_auto_switch:
+  # Enable hourly OpenAI proxy checks and account proxy replacement
+  # 是否启用每小时检测并自动替换 OpenAI 账号代理
+  enabled: true
+  # Check interval in minutes
+  # 检测间隔，单位分钟
+  interval_minutes: 60
+  # Only proxies with OpenAI latency <= this threshold can be selected
+  # 只有 OpenAI 延迟小于等于该阈值的代理才会被选中
+  max_latency_ms: 2000
+  # Country codes to exclude from OpenAI proxy candidates
+  # OpenAI 候选代理排除的出口国家/地区代码
+  excluded_country_codes: ["HK"]
+
 # =============================================================================
 # API Key Auth Cache Configuration
 # API Key 认证缓存配置

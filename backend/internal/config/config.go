@@ -88,6 +88,7 @@ type Config struct {
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
+	OpenAIProxyAutoSwitch   OpenAIProxyAutoSwitchConfig   `mapstructure:"openai_proxy_auto_switch"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
@@ -147,6 +148,13 @@ type GeminiTierQuotaConfig struct {
 	ProRPD          *int64 `mapstructure:"pro_rpd" json:"pro_rpd"`
 	FlashRPD        *int64 `mapstructure:"flash_rpd" json:"flash_rpd"`
 	CooldownMinutes *int   `mapstructure:"cooldown_minutes" json:"cooldown_minutes"`
+}
+
+type OpenAIProxyAutoSwitchConfig struct {
+	Enabled              bool     `mapstructure:"enabled"`
+	IntervalMinutes      int      `mapstructure:"interval_minutes"`
+	MaxLatencyMs         int64    `mapstructure:"max_latency_ms"`
+	ExcludedCountryCodes []string `mapstructure:"excluded_country_codes"`
 }
 
 type UpdateConfig struct {
@@ -1954,6 +1962,12 @@ func setDefaults() {
 	viper.SetDefault("token_refresh.refresh_before_expiry_hours", 0.5) // 提前30分钟刷新（适配Google 1小时token）
 	viper.SetDefault("token_refresh.max_retries", 3)                   // 最多重试3次
 	viper.SetDefault("token_refresh.retry_backoff_seconds", 2)         // 重试退避基础2秒
+
+	// OpenAI proxy auto switch
+	viper.SetDefault("openai_proxy_auto_switch.enabled", true)
+	viper.SetDefault("openai_proxy_auto_switch.interval_minutes", 60)
+	viper.SetDefault("openai_proxy_auto_switch.max_latency_ms", 2000)
+	viper.SetDefault("openai_proxy_auto_switch.excluded_country_codes", []string{"HK"})
 
 	// Gemini OAuth - configure via environment variables or config file
 	// GEMINI_OAUTH_CLIENT_ID and GEMINI_OAUTH_CLIENT_SECRET

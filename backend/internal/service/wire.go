@@ -183,6 +183,19 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	return svc
 }
 
+// ProvideOpenAIProxyAutoSwitchService creates and starts OpenAIProxyAutoSwitchService.
+func ProvideOpenAIProxyAutoSwitchService(
+	accountRepo AccountRepository,
+	proxyRepo ProxyRepository,
+	proxyProber ProxyExitInfoProber,
+	proxyLatencyCache ProxyLatencyCache,
+	cfg *config.Config,
+) *OpenAIProxyAutoSwitchService {
+	svc := NewOpenAIProxyAutoSwitchService(accountRepo, proxyRepo, proxyProber, proxyLatencyCache, cfg.OpenAIProxyAutoSwitch)
+	svc.Start()
+	return svc
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -577,6 +590,7 @@ var ProviderSet = wire.NewSet(
 	ProvideTokenRefreshService,
 	ProvideAccountExpiryService,
 	ProvideProxyExpiryService,
+	ProvideOpenAIProxyAutoSwitchService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
 	ProvideDashboardAggregationService,

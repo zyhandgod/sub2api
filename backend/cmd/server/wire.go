@@ -82,6 +82,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	proxyExpiry *service.ProxyExpiryService,
+	openAIProxyAutoSwitch *service.OpenAIProxyAutoSwitchService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -176,6 +177,12 @@ func provideCleanup(
 			}},
 			{"ProxyExpiryService", func() error {
 				proxyExpiry.Stop()
+				return nil
+			}},
+			{"OpenAIProxyAutoSwitchService", func() error {
+				if openAIProxyAutoSwitch != nil {
+					openAIProxyAutoSwitch.Stop()
+				}
 				return nil
 			}},
 			{"SubscriptionExpiryService", func() error {
