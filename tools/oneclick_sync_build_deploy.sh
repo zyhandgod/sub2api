@@ -232,11 +232,11 @@ RUN addgroup -g 1000 sub2api \
 
 WORKDIR /app
 
-COPY --chmod=755 sub2api /app/sub2api
+COPY sub2api /app/sub2api
 COPY --chown=sub2api:sub2api resources /app/resources
 RUN mkdir -p /app/data && chown sub2api:sub2api /app/data
 
-COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
 EXPOSE 8080
 
@@ -262,6 +262,7 @@ fi
 
 exec "$@"
 EOF
+run chmod +x "${REMOTE_RELEASE_DIR}/docker-entrypoint.sh"
 run docker build -t "${REMOTE_IMAGE}-${VERSION}" "${REMOTE_RELEASE_DIR}"
 if docker image inspect "${REMOTE_IMAGE}" >/dev/null 2>&1; then
   run docker tag "${REMOTE_IMAGE}" "${REMOTE_IMAGE}-backup-${STAMP}"
