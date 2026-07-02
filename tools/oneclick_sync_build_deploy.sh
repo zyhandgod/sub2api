@@ -82,6 +82,7 @@ STAMP="$(date '+%Y%m%d-%H%M%S')"
 BUILD_DIR="${REPO_ROOT}/.dev/release/${VERSION}-${STAMP}"
 BIN_PATH="${BUILD_DIR}/sub2api"
 FRONTEND_TAR="${BUILD_DIR}/frontend-dist.tar.gz"
+RESOURCES_TAR="${BUILD_DIR}/resources.tar.gz"
 REMOTE_RELEASE_DIR="${REMOTE_RELEASE_ROOT}/sub2api-runtime-build-${VERSION}-${STAMP}"
 
 log "Prepare build directory: ${BUILD_DIR}"
@@ -114,8 +115,11 @@ log "Build linux/amd64 backend with embedded frontend, version ${VERSION}"
 log "Package public frontend dist"
 COPYFILE_DISABLE=1 tar -czf "${FRONTEND_TAR}" -C "${REPO_ROOT}/backend/internal/web/dist" .
 
+log "Package backend resources"
+COPYFILE_DISABLE=1 tar -czf "${RESOURCES_TAR}" -C "${REPO_ROOT}/backend" resources
+
 log "Show build artifacts"
-run ls -lh "${BIN_PATH}" "${FRONTEND_TAR}"
+run ls -lh "${BIN_PATH}" "${FRONTEND_TAR}" "${RESOURCES_TAR}"
 run file "${BIN_PATH}"
 
 log "Create remote release directory: ${SERVER}:${REMOTE_RELEASE_DIR}"
@@ -124,6 +128,7 @@ run ssh -o ConnectTimeout=12 "${SERVER}" "mkdir -p '${REMOTE_RELEASE_DIR}'"
 log "Upload artifacts"
 run scp "${BIN_PATH}" "${SERVER}:${REMOTE_RELEASE_DIR}/sub2api"
 run scp "${FRONTEND_TAR}" "${SERVER}:${REMOTE_RELEASE_DIR}/frontend-dist.tar.gz"
+run scp "${RESOURCES_TAR}" "${SERVER}:${REMOTE_RELEASE_DIR}/resources.tar.gz"
 
 log "Deploy on server"
 ssh -o ConnectTimeout=12 "${SERVER}" \
@@ -139,6 +144,48 @@ run() {
   "$@"
 }
 
+cleanup_old_backend_images() {
+  local keep_count="${SUB2API_IMAGE_KEEP_COUNT:-2}"
+  case "${keep_count}" in
+    ''|*[!0-9]*) keep_count=2 ;;
+  esac
+  if [ "${keep_count}" -lt 1 ]; then
+    keep_count=1
+  fi
+
+  local image_repo="${REMOTE_IMAGE%%:*}"
+  local image_tag="${REMOTE_IMAGE#*:}"
+  if [ "${image_repo}" = "${REMOTE_IMAGE}" ]; then
+    image_tag="latest"
+  fi
+
+  log "Clean old ${image_repo}:${image_tag}-* images, keep latest ${keep_count}"
+
+  local tmp_file
+  tmp_file="$(mktemp)"
+  docker image ls "${image_repo}" \
+    --format '{{.Repository}}:{{.Tag}} {{.CreatedAt}}' \
+    | awk -v prefix="${image_repo}:${image_tag}-" '$1 ~ "^" prefix {print}' \
+    | sort -k2,3r > "${tmp_file}"
+
+  if [ ! -s "${tmp_file}" ]; then
+    rm -f "${tmp_file}"
+    log "No old backend image tags found"
+    return 0
+  fi
+
+  awk -v keep="${keep_count}" 'NR > keep {print $1}' "${tmp_file}" | while read -r image; do
+    [ -n "${image}" ] || continue
+    if docker ps -a --format '{{.Image}}' | grep -Fxq "${image}"; then
+      log "Skip image still referenced by a container: ${image}"
+      continue
+    fi
+    run docker image rm "${image}" || true
+  done
+
+  rm -f "${tmp_file}"
+}
+
 log "Validate uploaded binary"
 run chmod +x "${REMOTE_RELEASE_DIR}/sub2api"
 run "${REMOTE_RELEASE_DIR}/sub2api" --version
@@ -148,15 +195,81 @@ if docker ps --format '{{.Names}}' | grep -qx "${REMOTE_CONTAINER}"; then
   docker exec "${REMOTE_CONTAINER}" sh -c "cp /app/sub2api /app/data/sub2api-backup-${VERSION}-${STAMP}-before-deploy" || true
 fi
 
-log "Build new backend image from existing image"
+log "Prepare clean backend image context"
+run mkdir -p "${REMOTE_RELEASE_DIR}/resources"
+run tar -xzf "${REMOTE_RELEASE_DIR}/resources.tar.gz" -C "${REMOTE_RELEASE_DIR}"
 cat > "${REMOTE_RELEASE_DIR}/Dockerfile" <<EOF
-FROM ${REMOTE_IMAGE}
-COPY sub2api /app/sub2api
-RUN chmod +x /app/sub2api
+ARG ALPINE_IMAGE=alpine:3.21
+ARG POSTGRES_IMAGE=postgres:18-alpine
+
+FROM \${POSTGRES_IMAGE} AS pg-client
+
+FROM \${ALPINE_IMAGE}
+
+LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
+LABEL description="Sub2API custom backend-only build"
+LABEL org.opencontainers.image.source="https://github.com/zyhandgod/sub2api"
+
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    wget \
+    su-exec \
+    libpq \
+    zstd-libs \
+    lz4-libs \
+    krb5-libs \
+    libldap \
+    libedit \
+  && rm -rf /var/cache/apk/*
+
+COPY --from=pg-client /usr/local/bin/pg_dump /usr/local/bin/pg_dump
+COPY --from=pg-client /usr/local/bin/psql /usr/local/bin/psql
+COPY --from=pg-client /usr/local/lib/libpq.so.5* /usr/local/lib/
+
+RUN addgroup -g 1000 sub2api \
+  && adduser -u 1000 -G sub2api -s /bin/sh -D sub2api
+
+WORKDIR /app
+
+COPY --chmod=755 sub2api /app/sub2api
+COPY --chown=sub2api:sub2api resources /app/resources
+RUN mkdir -p /app/data && chown sub2api:sub2api /app/data
+
+COPY --chmod=755 docker-entrypoint.sh /app/docker-entrypoint.sh
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD wget -q -T 5 -O /dev/null http://localhost:\${SERVER_PORT:-8080}/health || exit 1
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["/app/sub2api"]
+EOF
+cat > "${REMOTE_RELEASE_DIR}/docker-entrypoint.sh" <<'EOF'
+#!/bin/sh
+set -e
+
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p /app/data
+  chown -R sub2api:sub2api /app/data 2>/dev/null || true
+  exec su-exec sub2api "$0" "$@"
+fi
+
+if [ "${1#-}" != "$1" ]; then
+  set -- /app/sub2api "$@"
+fi
+
+exec "$@"
 EOF
 run docker build -t "${REMOTE_IMAGE}-${VERSION}" "${REMOTE_RELEASE_DIR}"
-run docker tag "${REMOTE_IMAGE}" "${REMOTE_IMAGE}-backup-${STAMP}"
+if docker image inspect "${REMOTE_IMAGE}" >/dev/null 2>&1; then
+  run docker tag "${REMOTE_IMAGE}" "${REMOTE_IMAGE}-backup-${STAMP}"
+else
+  log "Skip backup tag because ${REMOTE_IMAGE} does not exist locally"
+fi
 run docker tag "${REMOTE_IMAGE}-${VERSION}" "${REMOTE_IMAGE}"
+cleanup_old_backend_images
 
 log "Recreate application container with Docker Compose v2"
 cd "${REMOTE_APP_DIR}"
