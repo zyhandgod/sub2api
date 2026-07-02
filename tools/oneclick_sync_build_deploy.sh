@@ -64,6 +64,13 @@ if [ "${SKIP_GIT}" != "1" ]; then
   run git fetch "${OFFICIAL_REMOTE}" --tags
   run git fetch "${FORK_REMOTE}" --tags || true
 
+  if git show-ref --verify --quiet "refs/remotes/${FORK_REMOTE}/main"; then
+    log "Merge ${FORK_REMOTE}/main into ${BRANCH}"
+    run git merge "${FORK_REMOTE}/main"
+  else
+    log "Skip ${FORK_REMOTE}/main merge because it was not found"
+  fi
+
   log "Merge ${OFFICIAL_REMOTE}/main into ${BRANCH}"
   run git merge "${OFFICIAL_REMOTE}/main"
 
