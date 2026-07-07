@@ -32,8 +32,8 @@
         >
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div class="min-w-0">
-              <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
-                {{ t('admin.accounts.dataImportDropTitle') }}
+              <div class="truncate text-sm font-medium text-gray-900 dark:text-white" :title="fileListTitle">
+                {{ selectedFilesLabel || t('admin.accounts.dataImportDropTitle') }}
               </div>
               <div class="mt-1 text-xs text-gray-500 dark:text-dark-400">
                 {{ t('admin.accounts.dataImportDropHint') }}
@@ -76,7 +76,7 @@
             class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800"
           >
             <div v-for="(item, idx) in errorItems" :key="idx" class="whitespace-pre-wrap">
-              {{ item.kind }} {{ item.name || item.proxy_key || '-' }} — {{ item.message }}
+              {{ item.kind }} {{ item.name || item.proxy_key || '-' }} - {{ item.message }}
             </div>
           </div>
         </div>
@@ -131,10 +131,17 @@ const sourceFiles = ref<File[]>([])
 const sourceFileCount = ref(0)
 const mergedContent = ref('')
 const mergedFileKind = ref<'standard' | 'codex' | null>(null)
+const hasCreatedData = ref(false)
 const result = ref<AdminDataImportResult | null>(null)
 
 const fileInput = ref<HTMLInputElement | null>(null)
 
+const selectedFilesLabel = computed(() => {
+  if (sourceFiles.value.length === 0) return ''
+  if (sourceFiles.value.length === 1) return sourceFiles.value[0]?.name || ''
+  return t('admin.accounts.selectedCount', { count: sourceFiles.value.length })
+})
+const fileListTitle = computed(() => sourceFiles.value.map((item) => item.name).join(', '))
 const errorItems = computed(() => result.value?.errors || [])
 
 watch(
@@ -145,6 +152,7 @@ watch(
       sourceFileCount.value = 0
       mergedContent.value = ''
       mergedFileKind.value = null
+      hasCreatedData.value = false
       result.value = null
       if (fileInput.value) {
         fileInput.value.value = ''
@@ -159,14 +167,35 @@ const openFilePicker = () => {
 
 const handleFileChange = async (event: Event) => {
   const target = event.target as HTMLInputElement
-  sourceFiles.value = collectFromFileList(target.files)
-  await prepareMergedFile(sourceFiles.value)
+  const incoming = Array.from(target.files || [])
+  const nextFiles = collectFromFileList(target.files)
+  if (incoming.length > 0 && nextFiles.length < incoming.length) {
+    appStore.showWarning(
+      t('admin.accounts.dataImportIgnoredFiles', { count: incoming.length - nextFiles.length })
+    )
+  }
+  if (nextFiles.length === 0) {
+    appStore.showError(t('admin.accounts.dataImportSelectFile'))
+    target.value = ''
+    return
+  }
+  sourceFiles.value = nextFiles
+  await prepareMergedFile(nextFiles)
+  target.value = ''
 }
 
 const handleFileDrop = async (event: DragEvent) => {
   dragActive.value = false
-  sourceFiles.value = await collectFromDataTransfer(event.dataTransfer)
-  await prepareMergedFile(sourceFiles.value)
+  if (importing.value) return
+
+  const nextFiles = await collectFromDataTransfer(event.dataTransfer)
+  if (nextFiles.length === 0) {
+    appStore.showError(t('admin.accounts.dataImportSelectFile'))
+    return
+  }
+
+  sourceFiles.value = nextFiles
+  await prepareMergedFile(nextFiles)
   if (fileInput.value) {
     fileInput.value.value = ''
   }
@@ -174,6 +203,10 @@ const handleFileDrop = async (event: DragEvent) => {
 
 const handleClose = () => {
   if (importing.value) return
+  if (hasCreatedData.value) {
+    hasCreatedData.value = false
+    emit('imported')
+  }
   emit('close')
 }
 
@@ -195,18 +228,43 @@ const readFileAsText = async (sourceFile: File): Promise<string> => {
   })
 }
 
-const readJsonPayloads = async (sourceFiles: File[]): Promise<unknown[]> => {
-  return await Promise.all(sourceFiles.map(async (sourceFile) => JSON.parse(await readFileAsText(sourceFile))))
+const SUPPORTED_DATA_TYPES = ['sub2api-data', 'sub2api-bundle']
+const SUPPORTED_DATA_VERSION = 1
+
+const isValidDataPayload = (payload: unknown): payload is AdminDataPayload => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+  const candidate = payload as Record<string, unknown>
+  if (
+    candidate.type !== undefined &&
+    candidate.type !== '' &&
+    !SUPPORTED_DATA_TYPES.includes(candidate.type as string)
+  ) {
+    return false
+  }
+  if (
+    candidate.version !== undefined &&
+    candidate.version !== 0 &&
+    candidate.version !== SUPPORTED_DATA_VERSION
+  ) {
+    return false
+  }
+  return Array.isArray(candidate.proxies) && Array.isArray(candidate.accounts)
 }
 
-const readImportPayload = (payloads: any[]): AdminDataPayload => {
+const mergeDataPayloads = (payloads: AdminDataPayload[]): AdminDataPayload => {
   const [firstPayload] = payloads
+  if (payloads.length === 1 && firstPayload) return firstPayload
+
   return {
-    type: firstPayload?.type,
-    version: firstPayload?.version,
-    exported_at: firstPayload?.exported_at || new Date().toISOString(),
-    proxies: payloads.flatMap((payload) => payload.proxies ?? []),
-    accounts: payloads.flatMap((payload) => payload.accounts ?? [])
+    type: payloads.find((item) => typeof item.type === 'string')?.type,
+    version: payloads.find((item) => typeof item.version === 'number')?.version,
+    exported_at: new Date().toISOString(),
+    proxies: payloads.flatMap((item) => item.proxies),
+    accounts: payloads.flatMap((item) => item.accounts),
+    skipped_shadows: payloads.reduce((sum, item) => {
+      const count = Number(item.skipped_shadows || 0)
+      return Number.isFinite(count) ? sum + count : sum
+    }, 0)
   }
 }
 
@@ -216,10 +274,6 @@ const isCodexPayload = (payload: unknown): boolean => {
     payload !== null &&
     String((payload as { type?: unknown }).type ?? '').trim().toLowerCase() === 'codex'
   )
-}
-
-const buildCodexImportContent = (payloads: unknown[]): string => {
-  return JSON.stringify(payloads, null, 2)
 }
 
 const toDataImportResultFromCodex = (codexResult: CodexSessionImportResult): AdminDataImportResult => {
@@ -243,31 +297,46 @@ const prepareMergedFile = async (nextFiles: File[]) => {
   mergedContent.value = ''
   mergedFileKind.value = null
 
-  if (nextFiles.length === 0) return
-
-  try {
-    const payloads = await readJsonPayloads(nextFiles)
-    const hasCodexPayload = payloads.some(isCodexPayload)
-    const hasStandardPayload = payloads.some((payload) => !isCodexPayload(payload))
-
-    if (hasCodexPayload && hasStandardPayload) {
-      appStore.showError(t('admin.accounts.dataImportMixedTypes'))
+  const payloads: unknown[] = []
+  for (const sourceFile of nextFiles) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(await readFileAsText(sourceFile))
+    } catch {
+      appStore.showError(t('admin.accounts.dataImportParseFailedFile', { name: sourceFile.name }))
       return
     }
-
-    const kind = hasCodexPayload ? 'codex' : 'standard'
-    mergedContent.value = kind === 'codex'
-      ? buildCodexImportContent(payloads)
-      : JSON.stringify(readImportPayload(payloads as any[]), null, 2)
-
-    mergedFileKind.value = kind
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      appStore.showError(t('admin.accounts.dataImportParseFailed'))
-    } else {
-      appStore.showError(t('admin.accounts.dataImportFailed'))
-    }
+    payloads.push(parsed)
   }
+
+  const hasCodexPayload = payloads.some(isCodexPayload)
+  const hasStandardPayload = payloads.some((payload) => !isCodexPayload(payload))
+  if (hasCodexPayload && hasStandardPayload) {
+    appStore.showError(t('admin.accounts.dataImportMixedTypes'))
+    return
+  }
+
+  if (hasCodexPayload) {
+    mergedContent.value = JSON.stringify(payloads, null, 2)
+    mergedFileKind.value = 'codex'
+    return
+  }
+
+  const dataPayloads: AdminDataPayload[] = []
+  for (let index = 0; index < payloads.length; index += 1) {
+    const parsed = payloads[index]
+    const sourceFile = nextFiles[index]
+    if (!isValidDataPayload(parsed)) {
+      appStore.showError(
+        t('admin.accounts.dataImportInvalidFile', { name: sourceFile?.name || '' })
+      )
+      return
+    }
+    dataPayloads.push(parsed)
+  }
+
+  mergedContent.value = JSON.stringify(mergeDataPayloads(dataPayloads), null, 2)
+  mergedFileKind.value = 'standard'
 }
 
 const handleImport = async () => {
@@ -302,6 +371,9 @@ const handleImport = async () => {
       proxy_failed: res.proxy_failed,
     }
     if (res.account_failed > 0 || res.proxy_failed > 0) {
+      if (res.account_created > 0 || res.proxy_created > 0) {
+        hasCreatedData.value = true
+      }
       appStore.showError(t('admin.accounts.dataImportCompletedWithErrors', msgParams))
     } else {
       appStore.showSuccess(t('admin.accounts.dataImportSuccess', msgParams))
