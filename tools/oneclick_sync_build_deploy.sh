@@ -41,6 +41,10 @@ run() {
   "$@"
 }
 
+version_lt() {
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
 cd "${REPO_ROOT}"
 
 require_cmd git
@@ -73,6 +77,15 @@ if [ "${SKIP_GIT}" != "1" ]; then
 
   log "Merge ${OFFICIAL_REMOTE}/main into ${BRANCH}"
   run git merge "${OFFICIAL_REMOTE}/main"
+
+  OFFICIAL_VERSION="$(git show "${OFFICIAL_REMOTE}/main:backend/cmd/server/VERSION" 2>/dev/null | tr -d '\r\n' || true)"
+  LOCAL_VERSION="$(tr -d '\r\n' < "${REPO_ROOT}/backend/cmd/server/VERSION")"
+  if [ -n "${OFFICIAL_VERSION}" ] && version_lt "${LOCAL_VERSION}" "${OFFICIAL_VERSION}"; then
+    log "Restore official VERSION ${OFFICIAL_VERSION}; local VERSION ${LOCAL_VERSION} is older"
+    printf '%s\n' "${OFFICIAL_VERSION}" > "${REPO_ROOT}/backend/cmd/server/VERSION"
+    run git add "${REPO_ROOT}/backend/cmd/server/VERSION"
+    run git commit -m "chore: sync VERSION to ${OFFICIAL_VERSION} [skip ci]"
+  fi
 
   if [ "${SKIP_PUSH}" != "1" ]; then
     log "Push synced branch and main to ${FORK_REMOTE}"
