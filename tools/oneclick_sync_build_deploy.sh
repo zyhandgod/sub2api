@@ -22,6 +22,7 @@ SKIP_GIT="${SKIP_GIT:-0}"
 SKIP_PUSH="${SKIP_PUSH:-0}"
 SKIP_FRONTEND="${SKIP_FRONTEND:-0}"
 SKIP_PUBLIC_DIST="${SKIP_PUBLIC_DIST:-0}"
+SKIP_GENERATE="${SKIP_GENERATE:-0}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -43,6 +44,22 @@ run() {
 
 version_lt() {
   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
+regenerate_wire() {
+  [ "${SKIP_GENERATE}" = "1" ] && return 0
+
+  log "Regenerate backend Wire dependency injection"
+  (
+    cd "${REPO_ROOT}/backend"
+    run env GOCACHE="${GOCACHE}" go generate ./cmd/server
+  )
+
+  if [ -n "$(git status --porcelain --untracked-files=no -- backend/cmd/server/wire_gen.go)" ]; then
+    log "Commit regenerated backend Wire code"
+    run git add backend/cmd/server/wire_gen.go
+    run git commit -m "chore: regenerate Wire dependencies [skip ci]"
+  fi
 }
 
 cd "${REPO_ROOT}"
@@ -86,13 +103,15 @@ if [ "${SKIP_GIT}" != "1" ]; then
     run git add "${REPO_ROOT}/backend/cmd/server/VERSION"
     run git commit -m "chore: sync VERSION to ${OFFICIAL_VERSION} [skip ci]"
   fi
+fi
 
-  if [ "${SKIP_PUSH}" != "1" ]; then
-    log "Push synced branch and main to ${FORK_REMOTE}"
-    run git push "${FORK_REMOTE}" "${BRANCH}"
-    run git push "${FORK_REMOTE}" "${BRANCH}:main"
-    run git push "${FORK_REMOTE}" --tags
-  fi
+regenerate_wire
+
+if [ "${SKIP_GIT}" != "1" ] && [ "${SKIP_PUSH}" != "1" ]; then
+  log "Push synced branch and main to ${FORK_REMOTE}"
+  run git push "${FORK_REMOTE}" "${BRANCH}"
+  run git push "${FORK_REMOTE}" "${BRANCH}:main"
+  run git push "${FORK_REMOTE}" --tags
 fi
 
 VERSION="$(tr -d '\r\n' < "${REPO_ROOT}/backend/cmd/server/VERSION")"
