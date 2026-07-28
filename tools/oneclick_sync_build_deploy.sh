@@ -49,16 +49,25 @@ version_lt() {
 regenerate_wire() {
   [ "${SKIP_GENERATE}" = "1" ] && return 0
 
+  local wire_files=(
+    backend/go.mod
+    backend/go.sum
+    backend/cmd/server/wire_gen.go
+  )
+
   log "Regenerate backend Wire dependency injection"
   (
     cd "${REPO_ROOT}/backend"
-    run env GOCACHE="${GOCACHE}" go generate ./cmd/server
+    # Wire is a generator tool whose own transitive modules may not yet be in
+    # this repository's go.sum. Allow Go to synchronize that metadata while
+    # generating, then commit it together with wire_gen.go below.
+    run env GOCACHE="${GOCACHE}" GOFLAGS=-mod=mod go generate ./cmd/server
   )
 
-  if [ -n "$(git status --porcelain --untracked-files=no -- backend/cmd/server/wire_gen.go)" ]; then
-    log "Commit regenerated backend Wire code"
-    run git add backend/cmd/server/wire_gen.go
-    run git commit -m "chore: regenerate Wire dependencies [skip ci]"
+  if [ -n "$(git status --porcelain --untracked-files=no -- "${wire_files[@]}")" ]; then
+    log "Commit regenerated Wire code and Go module metadata"
+    run git add -- "${wire_files[@]}"
+    run git commit -m "chore: sync Wire dependencies [skip ci]"
   fi
 }
 
