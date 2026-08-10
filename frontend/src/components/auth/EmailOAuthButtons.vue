@@ -29,6 +29,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GoogleMark from './GoogleMark.vue'
+import type { OAuthLoginStart } from '@/api/auth'
 import { resolveAffiliateReferralCode, storeOAuthAffiliateCode } from '@/utils/oauthAffiliate'
 
 type EmailOAuthProvider = 'google'
@@ -43,6 +44,9 @@ const props = withDefaults(defineProps<{
 }>(), {
   showDivider: true
 })
+const emit = defineEmits<{
+  start: [request: OAuthLoginStart]
+}>()
 
 const route = useRoute()
 const { t } = useI18n()
@@ -72,13 +76,10 @@ function startLogin(provider: EmailOAuthProvider): void {
   const affiliateCode = resolveAffiliateReferralCode(props.affCode, route.query.aff, route.query.aff_code)
   storeOAuthAffiliateCode(affiliateCode)
   window.sessionStorage.setItem(EMAIL_OAUTH_PENDING_PROVIDER_KEY, provider)
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
-  const normalized = apiBase.replace(/\/$/, '')
-  const params = new URLSearchParams({ redirect: redirectTo })
+  const params: Record<string, string> = { redirect: redirectTo }
   if (affiliateCode) {
-    params.set('aff_code', affiliateCode)
+    params.aff_code = affiliateCode
   }
-  const startURL = `${normalized}/auth/oauth/${provider}/start?${params.toString()}`
-  window.location.href = startURL
+  emit('start', { provider, params })
 }
 </script>
